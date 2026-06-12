@@ -1,415 +1,53 @@
 # BHI2.0
-BHI2.0 is a Python pipeline for cross-domain surgical hypothesis generation. It mines arXiv concepts, links them with surgical PubMed concepts, calculates semantic similarity, and ranks bridge hypotheses using LLM-based prioritization.
 
-# BHI2.0
+BHI2.0 is a research codebase for cross-domain hypothesis generation in surgery. The central idea of the project is to connect surgical problems with technical, physical, computational, robotic, material-science and systems-theory concepts from external scientific literature. The aim is not to generate medical claims or clinical recommendations, but to create a structured pipeline that can help identify unusual and potentially productive conceptual bridges for future research.
 
-**Bridge-Based Hypothesis Intelligence 2.0** is a Python-based research pipeline for cross-domain hypothesis generation in surgery. The project explores whether technical, physical, computational, robotic, material-science, and systems-theory concepts from external scientific literature can be linked to surgical concepts in order to generate mechanistically plausible research hypotheses.
+The project was developed as part of a broader attempt to make surgical hypothesis generation more systematic. In many areas of surgery, innovation depends on ideas that originally come from outside medicine: imaging physics, sensor technology, materials science, robotics, fluid mechanics, control theory, machine learning, optics, or engineering design. Searching for such links manually is difficult because the possible combinations between surgical concepts and external scientific principles grow extremely quickly. BHI2.0 tries to reduce this search space by turning scientific abstracts into reusable concepts, embedding those concepts into a semantic vector space, and then ranking possible cross-domain bridges.
 
-The repository contains the **arXiv-side external concept mining pipeline** and the **cross-domain bridge ranking pipeline** used to generate the first Top-1000 ranked hypothesis table based on a defined cosine-similarity window. It is intended as a methodological feasibility framework for literature-based discovery and concept-driven biomedical innovation.
+This repository contains the arXiv-side external concept mining workflow and the cross-domain ranking workflow used for the first Top-1000 bridge-hypothesis table based on a defined cosine-similarity window. This first ranking is referred to as the defined-FAR run. It should be distinguished from later experimental variants such as ULTRANEAR, ULTRAFAR, isolated-year runs, or additional graph-visualization workflows. Those later experiments are not the core focus of this repository.
 
-Importantly, this repository does **not** contain the original PubMed mining code used to create the surgical concept vocabulary. The PubMed-derived surgical concept files are treated as pre-existing inputs. This repository starts from those existing surgical concept tables and focuses on mining external arXiv concepts, embedding concepts, constructing cross-domain candidate pairs, filtering candidates, and ranking bridge hypotheses with an LLM.
+A key point is that the original PubMed mining pipeline is not included here. The surgical concept vocabulary was generated in a separate workflow from PubMed-derived surgical abstracts. In BHI2.0, these surgical concept files are treated as existing input files. Therefore, this repository does not represent a complete PubMed-to-hypothesis pipeline. It starts after the surgical concept vocabulary has already been created and focuses on mining external arXiv concepts, embedding them, harmonizing them with the surgical vocabulary, generating candidate pairs, filtering the candidate space, and ranking the resulting bridge hypotheses.
 
----
+The computational workflow begins with arXiv abstract mining. The script `01_arxiv_external_mining.py` searches arXiv for abstracts from selected non-biomedical scientific areas that may contain transferable ideas. These areas include, for example, self-organization, complex systems, topological transport, active matter, morphological computation, failure tolerance, rare-event prediction and related fields. The purpose of this step is to build an external scientific concept source that is not already limited to surgery or biomedicine.
 
-## Project rationale
+The second step, implemented in `02_extract_arxiv_external_concepts.py`, uses a language model to extract three reusable scientific concepts from each arXiv abstract. These concepts are intended to describe mechanisms, design principles, material properties, control strategies, sensing principles, dynamical-system ideas or computational structures. The script is not meant to reinterpret arXiv papers medically. It extracts external concepts first, and the cross-domain connection to surgery is only introduced later.
 
-Biomedical innovation often emerges when concepts from one field are transferred into another. In surgery, many major advances have historically depended on engineering, imaging, materials science, robotics, sensors, optics, and computational modeling. However, the search space for such cross-domain connections is enormous.
+The script `12_embed_arxiv_concepts.py` then cleans and summarizes these extracted concepts and creates semantic embeddings. These embeddings allow concepts to be compared computationally. In parallel, pre-existing surgical concept nodes and surgical concept embeddings are loaded from the earlier PubMed-derived workflow. The cleaning and harmonization step is handled by `13_clean_surg_arxiv.py`, which removes overly generic or low-value terms and prepares both vocabularies for cross-domain comparison.
 
-BHI2.0 addresses this problem by reducing large literature corpora into structured concept vocabularies. These vocabularies are embedded into a semantic vector space and then compared across domains. The aim is not to use a language model to invent hypotheses from scratch. Instead, the pipeline first creates candidate bridges through structured computational steps and then uses an LLM as a prioritization layer.
+Because the surgical vocabulary needed to be sufficiently broad for bridge generation, `13a_rebuild_full_surgery_vocab.py` reconstructs a fuller surgical concept vocabulary from the pre-existing surgical concept rows. This is still based on already generated PubMed-derived surgical concept data; the PubMed mining code itself is not part of this repository.
 
-The core idea is:
+The bridge-generation part of the workflow is then performed by `14_generate_far_crossdomain_candidate_pairs.py` and `14b_filter_far_candidate_pairs.py`. These scripts create and filter candidate pairs between surgical concepts and external arXiv concepts. The first main ranking run used a defined cosine-similarity window. This means the pipeline did not simply choose the closest concepts, nor did it only focus on extremely distant pairs. Instead, it aimed to identify concept pairs that were semantically far enough to be interesting but not so far that a plausible transfer became unlikely.
 
-```text
-surgical concept + external technical concept → candidate bridge hypothesis
-```
+The resulting candidate bridges are ranked in `15_llm_rank_crossdomain_bridges.py`. In this step, the language model acts as a prioritization layer. It evaluates whether a candidate bridge appears novel, plausible, mechanistically meaningful and relevant enough to deserve manual scientific review. The model is therefore not the sole generator of the hypotheses. The candidate space is first constructed by earlier computational steps, and the LLM is then used to help rank and interpret that space.
 
-The first main run in this repository focuses on a **defined FAR** semantic-distance window. This was the first Top-1000 ranking generated before later ULTRANEAR, ULTRAFAR, or isolated-year experimental variants were explored.
+The optional conversion scripts, including `16_convert_FULL_ranked_csvs_to_excel.py` and `16_convert_ranked_csv_to_excel.py`, convert ranked CSV outputs into Excel files for manual inspection and downstream review.
 
----
-
-## What this repository contains
-
-This repository contains the code and documentation for the external arXiv and cross-domain ranking part of the project.
-
-Included components:
-
-* arXiv abstract mining
-* extraction of three transferable external concepts per abstract
-* concept normalization and filtering
-* embedding of arXiv concepts
-* cleaning and harmonization of surgical and arXiv vocabularies
-* reconstruction of a full surgical vocabulary from pre-existing surgical concept rows
-* generation of cross-domain candidate pairs
-* filtering of candidate pairs into a defined cosine-similarity window
-* LLM-based ranking of candidate bridge hypotheses
-* optional export of ranked results to Excel
-
-Excluded components:
-
-* original PubMed mining scripts
-* original PubMed abstract retrieval pipeline
-* raw PubMed datasets
-* raw arXiv datasets
-* large processed CSV files
-* embedding matrices
-* generated output rankings
-* API keys and environment files
-
-The repository is therefore not a full end-to-end PubMed-to-hypothesis pipeline. It is the arXiv-to-cross-domain-ranking component that depends on precomputed surgical concept inputs.
-
----
-
-## Repository structure
-
-```text
-BHI2.0/
-│
-├── README.md
-├── requirements.txt
-├── .gitignore
-│
-├── docs/
-│   ├── pipeline_overview.md
-│   └── first_top1000_defined_far_run.md
-│
-├── scripts/
-│   ├── 01_arxiv_external_mining.py
-│   ├── 02_extract_arxiv_external_concepts.py
-│   ├── 12_embed_arxiv_concepts.py
-│   ├── 13_clean_surg_arxiv.py
-│   ├── 13a_rebuild_full_surgery_vocab.py
-│   ├── 14_generate_far_crossdomain_candidate_pairs.py
-│   ├── 14b_filter_far_candidate_pairs.py
-│   ├── 15_llm_rank_crossdomain_bridges.py
-│   ├── 16_convert_FULL_ranked_csvs_to_excel.py
-│   └── 16_convert_ranked_csv_to_excel.py
-│
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   ├── processed_arxiv_external/
-│   └── processed_crossdomain/
-│
-├── outputs/
-│   ├── rankings/
-│   ├── figures/
-│   └── excel_exports/
-│
-└── archive_excluded/
-```
-
-The `data/` and `outputs/` folders are intentionally ignored by Git except for placeholder files. This prevents large research files, embeddings, generated rankings, and intermediate CSV files from being committed accidentally.
-
----
-
-## Core pipeline
-
-The first defined-FAR Top-1000 ranking was generated with the following core script sequence:
+The core script sequence for the first defined-FAR Top-1000 run is:
 
 ```text
 01 → 02 → 12 → 13 → 13a → 14 → 14b → 15 → optional 16
 ```
 
-### Step 01: arXiv abstract mining
+The repository is organized around code and documentation rather than raw data. Large CSV files, embeddings, raw abstract exports and generated ranking outputs are intentionally not tracked in Git. This keeps the repository usable and prevents accidental upload of large intermediate files or API-derived outputs. The expected data folders are present only as structure placeholders. Users who want to reproduce the full workflow need to provide the corresponding input files locally.
 
-```text
-scripts/01_arxiv_external_mining.py
-```
+The most important expected pre-existing surgical inputs are files such as `concept_nodes_summary.csv`, `concept_embeddings.csv` and `concepts_2_per_abstract.csv`. These originate from the separate PubMed-based surgical concept extraction workflow. On the arXiv side, the pipeline creates files such as `all_modules_combined_PROGRESS.csv`, `arxiv_external_concepts_3_per_abstract.csv`, `arxiv_external_concept_nodes_summary.csv` and `arxiv_external_concept_embeddings.csv`. Cross-domain outputs are written into processed output folders and are ignored by Git by default.
 
-Downloads external scientific abstracts from arXiv using predefined thematic modules. These modules target non-biomedical scientific areas that may contain transferable mechanisms, such as self-organization, topological transport, active matter, morphological computation, failure tolerance, rare-event prediction, and dynamical systems.
-
-Typical outputs:
-
-```text
-data_raw_arxiv_external/all_modules_combined_PROGRESS.csv
-data_raw_arxiv_external/all_modules_combined.csv
-```
-
-### Step 02: external concept extraction
-
-```text
-scripts/02_extract_arxiv_external_concepts.py
-```
-
-Uses an OpenAI language model to extract exactly three reusable scientific concepts from each arXiv abstract. The focus is on transferable mechanisms, structures, control principles, material principles, sensing principles, computational principles, and dynamical-system concepts.
-
-Typical output:
-
-```text
-data_processed_arxiv_external/arxiv_external_concepts_3_per_abstract.csv
-```
-
-### Step 12: arXiv concept embedding
-
-```text
-scripts/12_embed_arxiv_concepts.py
-```
-
-Cleans the extracted arXiv concepts, removes generic or low-value concepts, summarizes unique concept nodes, and generates semantic embeddings using an OpenAI embedding model.
-
-Typical outputs:
-
-```text
-data_processed_arxiv_external/arxiv_external_concept_nodes_summary.csv
-data_processed_arxiv_external/arxiv_external_concept_embeddings.csv
-```
-
-### Step 13: cross-domain vocabulary cleaning
-
-```text
-scripts/13_clean_surg_arxiv.py
-```
-
-Loads pre-existing surgical concept nodes and embeddings together with arXiv concept nodes and embeddings. It applies domain-specific cleaning rules to remove overly generic, low-value, or non-informative terms. It then produces cleaned surgical and arXiv vocabularies for cross-domain comparison.
-
-Typical inputs:
-
-```text
-data_processed/concept_nodes_summary.csv
-data_processed/concept_embeddings.csv
-data_processed_arxiv_external/arxiv_external_concept_nodes_summary.csv
-data_processed_arxiv_external/arxiv_external_concept_embeddings.csv
-```
-
-Typical outputs:
-
-```text
-data_processed_crossdomain/surgery_concepts_clean.csv
-data_processed_crossdomain/arxiv_concepts_clean.csv
-data_processed_crossdomain/surgery_embeddings_clean.csv
-data_processed_crossdomain/arxiv_embeddings_clean.csv
-```
-
-### Step 13a: full surgical vocabulary reconstruction
-
-```text
-scripts/13a_rebuild_full_surgery_vocab.py
-```
-
-Rebuilds a more complete surgical vocabulary from pre-existing surgical concept rows. This step is needed because the cross-domain bridge generation depends on a sufficiently broad surgical concept space.
-
-Typical input:
-
-```text
-data_processed/concepts_2_per_abstract.csv
-data_processed/concept_embeddings.csv
-```
-
-Typical outputs:
-
-```text
-data_processed_crossdomain/surgery_concepts_full_nodes.csv
-data_processed_crossdomain/surgery_concepts_full_clean.csv
-data_processed_crossdomain/surgery_embeddings_full_clean.csv
-```
-
-### Step 14: defined-FAR candidate generation
-
-```text
-scripts/14_generate_far_crossdomain_candidate_pairs.py
-```
-
-Generates cross-domain candidate pairs between cleaned surgical concepts and cleaned external arXiv concepts. Candidate pairs are selected according to semantic distance and cosine similarity. This step creates the candidate universe for the first defined-FAR hypothesis ranking.
-
-Typical outputs include cross-domain candidate pair tables in the processed cross-domain folder.
-
-### Step 14b: candidate pair filtering
-
-```text
-scripts/14b_filter_far_candidate_pairs.py
-```
-
-Filters the generated candidate pairs to obtain a more focused set for LLM ranking. The intended first main run uses a defined cosine-similarity window rather than later ULTRANEAR or ULTRAFAR variants.
-
-### Step 15: LLM ranking of bridge hypotheses
-
-```text
-scripts/15_llm_rank_crossdomain_bridges.py
-```
-
-Ranks candidate bridge hypotheses with an LLM. The model evaluates whether a surgical concept and an external technical concept form a plausible and potentially useful cross-domain research hypothesis.
-
-The LLM is used as a ranking and prioritization component, not as the sole generator of ideas.
-
-Typical output:
-
-```text
-llm_ranked_crossdomain_bridges_FULL_top.csv
-```
-
-### Step 16: optional Excel export
-
-```text
-scripts/16_convert_FULL_ranked_csvs_to_excel.py
-scripts/16_convert_ranked_csv_to_excel.py
-```
-
-Converts ranked CSV outputs into Excel files for manual inspection, sharing, and downstream scientific review.
-
----
-
-## Data requirements
-
-This repository expects several input files that are not included in GitHub because they are large, generated, or derived from prior workflows.
-
-Expected pre-existing surgical inputs include:
-
-```text
-data_processed/concept_nodes_summary.csv
-data_processed/concept_embeddings.csv
-data_processed/concepts_2_per_abstract.csv
-```
-
-These files originate from a separate PubMed-based surgical concept extraction workflow. That PubMed mining workflow is not part of this repository.
-
-Expected arXiv-side generated files include:
-
-```text
-data_raw_arxiv_external/all_modules_combined_PROGRESS.csv
-data_processed_arxiv_external/arxiv_external_concepts_3_per_abstract.csv
-data_processed_arxiv_external/arxiv_external_concept_nodes_summary.csv
-data_processed_arxiv_external/arxiv_external_concept_embeddings.csv
-```
-
-Generated cross-domain outputs are written to folders such as:
-
-```text
-data_processed_crossdomain/
-outputs/
-```
-
-These outputs are ignored by Git.
-
----
-
-## Environment variables
-
-The concept extraction, embedding generation, and LLM ranking scripts require access to the OpenAI API.
-
-Set the API key locally as an environment variable.
-
-On Windows PowerShell:
+Several scripts require access to the OpenAI API for concept extraction, embedding generation or LLM-based ranking. The API key should be provided locally as an environment variable and must never be committed to GitHub. On Windows PowerShell, this can be done with:
 
 ```powershell
 $env:OPENAI_API_KEY="your-api-key-here"
 ```
 
-On macOS/Linux:
+A minimal Python environment should include packages such as `pandas`, `numpy`, `tqdm`, `requests`, `openai`, `scikit-learn` and `openpyxl`. Additional packages may be needed for later visualization or graph-based extensions.
 
-```bash
-export OPENAI_API_KEY="your-api-key-here"
-```
+BHI2.0 should be understood as a methodological and exploratory research pipeline. It is not a clinical decision-support system, does not validate the truth of generated hypotheses, and does not provide medical recommendations. Any hypothesis generated by the workflow requires expert review, literature checking, experimental validation and, where relevant, clinical testing.
 
-Never commit API keys to GitHub. `.env` files and key files are ignored by `.gitignore`.
+The long-term purpose of the project is to investigate whether concept-based literature mining can help make surgical innovation more systematic. Instead of relying only on chance encounters between disciplines, BHI2.0 tries to create a computational framework that proposes candidate bridges between surgery and external scientific domains. These candidate bridges can then be reviewed by researchers and potentially developed into retrospective studies, systematic reviews, translational experiments, device concepts or interdisciplinary collaborations.
 
----
+## Citation: citation will be added when available, ## Licence as well
 
-## Installation
+## AI disclosure
 
-Create and activate a virtual environment.
+Parts of this repository were developed with the assistance of AI tools. AI was used to support code adaptation, code refactoring, documentation drafting, pipeline explanation and organization of the repository structure. The scientific direction, project framing, selection of the surgical research problem, interpretation of outputs and final responsibility for the repository remain with the repository owner. AI-generated or AI-assisted code and documentation should be reviewed carefully before reuse, extension or publication.
 
-On Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-On macOS/Linux:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-A minimal `requirements.txt` should include packages such as:
-
-```text
-pandas
-numpy
-tqdm
-requests
-openai
-scikit-learn
-openpyxl
-```
-
-Depending on future visualization or graph extensions, additional packages may be required.
-
----
-
-## Reproducibility notes
-
-This repository documents the computational logic of the first defined-FAR Top-1000 bridge ranking. Full reproducibility requires access to the same input concept tables, embeddings, and OpenAI model settings used during the original run.
-
-Potential sources of variation include:
-
-* updated arXiv search results
-* changes in external API behavior
-* differences in OpenAI model versions
-* non-identical input concept vocabularies
-* changes in filtering thresholds
-* missing intermediate CSV files
-
-For this reason, the repository should be understood as a transparent methodological codebase rather than a frozen data archive.
-
----
-
-## What BHI2.0 is not
-
-BHI2.0 is not a clinical decision support system.
-
-It does not provide medical recommendations.
-
-It does not validate whether a generated hypothesis is true.
-
-It does not replace expert review, systematic literature search, experimental testing, or clinical validation.
-
-It is a research pipeline for hypothesis prioritization and cross-domain exploration.
-
----
-
-## Intended use
-
-BHI2.0 may be useful for:
-
-* computational hypothesis generation
-* literature-based discovery
-* surgical innovation research
-* identifying translational engineering concepts
-* prioritizing unconventional research directions
-* exploring concept-level links between biomedical and technical literature
-* preparing candidate ideas for expert review
-
-The final interpretation of any generated bridge hypothesis requires domain expertise.
-
----
-
-## License
-
-No license has currently been selected. Until a license is added, all rights are reserved by the repository owner by default. Users should not assume permission to reuse, redistribute, or modify the code outside the repository without explicit permission.
-
----
-
-## Citation
-
-A formal citation will be added if this project is published or archived with a DOI.
-
-For now, please cite the repository URL if referencing this codebase informally.
-
----
-
-## Status
-
-This repository is under active development.
-
-Current focus:
-
-```text
-defined-FAR Top-1000 cross-domain bridge ranking
-```
-
-Later experimental branches such as ULTRANEAR, ULTRAFAR, isolated-year ranking, and graph visualization are not part of the initial core pipeline documented here.
 
