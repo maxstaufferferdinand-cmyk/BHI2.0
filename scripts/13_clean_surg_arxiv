@@ -1,0 +1,720 @@
+from pathlib import Path
+import re
+import pandas as pd
+
+
+# ============================================================
+# INPUT FILES
+# ============================================================
+
+SURGERY_NODE_FILE = Path("data_processed/concept_nodes_summary.csv")
+SURGERY_EMBEDDING_FILE = Path("data_processed/concept_embeddings.csv")
+
+ARXIV_NODE_FILE = Path("data_processed_arxiv_external/arxiv_external_concept_nodes_summary.csv")
+ARXIV_EMBEDDING_FILE = Path("data_processed_arxiv_external/arxiv_external_concept_embeddings.csv")
+
+
+# ============================================================
+# OUTPUT FILES
+# ============================================================
+
+OUT_DIR = Path("data_processed_crossdomain")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+SURGERY_CLEAN_FILE = OUT_DIR / "surgery_concepts_clean.csv"
+ARXIV_CLEAN_FILE = OUT_DIR / "arxiv_concepts_clean.csv"
+
+SURGERY_EMBEDDING_CLEAN_FILE = OUT_DIR / "surgery_embeddings_clean.csv"
+ARXIV_EMBEDDING_CLEAN_FILE = OUT_DIR / "arxiv_embeddings_clean.csv"
+
+REMOVED_SURGERY_FILE = OUT_DIR / "removed_surgery_concepts_review.csv"
+REMOVED_ARXIV_FILE = OUT_DIR / "removed_arxiv_concepts_review.csv"
+
+SUMMARY_FILE = OUT_DIR / "cleaning_summary.txt"
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
+MIN_SURGERY_OCCURRENCE = 3
+MIN_ARXIV_OCCURRENCE = 1
+
+MIN_WORDS = 2
+MAX_WORDS = 8
+
+VERY_HIGH_SURGERY_OCCURRENCE = 500
+
+
+# ============================================================
+# TEXT NORMALIZATION
+# ============================================================
+
+def normalize_text(x: str) -> str:
+    x = str(x).lower().strip()
+    x = re.sub(r"[-_/]", " ", x)
+    x = re.sub(r"[^a-z0-9α-ωβγδκλμσπφχψω\s]", "", x)
+    x = re.sub(r"\s+", " ", x)
+    return x.strip()
+
+
+def word_count(x: str) -> int:
+    return len(normalize_text(x).split())
+
+
+def contains_any(x: str, terms) -> bool:
+    x = normalize_text(x)
+    return any(t in x for t in terms)
+
+
+def exact_any(x: str, terms) -> bool:
+    x = normalize_text(x)
+    return x in terms
+
+
+def ends_with_any(x: str, terms) -> bool:
+    x = normalize_text(x)
+    words = x.split()
+    if not words:
+        return True
+    return words[-1] in terms
+
+
+# ============================================================
+# GENERIC FILTER TERMS
+# ============================================================
+
+UNIVERSAL_GENERIC_EXACT = {
+    "study",
+    "model",
+    "models",
+    "method",
+    "methods",
+    "result",
+    "results",
+    "framework",
+    "system",
+    "systems",
+    "approach",
+    "analysis",
+    "simulation",
+    "simulations",
+    "experiment",
+    "experiments",
+    "performance",
+    "algorithm",
+    "algorithms",
+    "data analysis",
+    "statistical analysis",
+    "numerical analysis",
+    "computational model",
+    "mathematical model",
+    "experimental results",
+    "proposed method",
+    "proposed approach",
+    "new method",
+    "novel method",
+    "efficient algorithm",
+}
+
+UNIVERSAL_BAD_ENDINGS = {
+    "model",
+    "models",
+    "method",
+    "methods",
+    "approach",
+    "framework",
+    "system",
+    "systems",
+    "analysis",
+    "simulation",
+    "simulations",
+    "performance",
+    "algorithm",
+    "algorithms",
+    "result",
+    "results",
+    "study",
+    "studies",
+    "effect",
+    "effects",
+    "impact",
+    "evaluation",
+    "assessment",
+    "comparison",
+}
+
+SURGERY_GENERIC_EXACT = {
+    "surgery",
+    "surgical procedure",
+    "surgical procedures",
+    "operative procedure",
+    "operative procedures",
+    "abdominal surgery",
+    "general surgery",
+    "visceral surgery",
+    "laparoscopic surgery",
+    "robotic surgery",
+    "minimally invasive surgery",
+    "open surgery",
+    "treatment",
+    "therapy",
+    "patient",
+    "patients",
+    "cohort",
+    "clinical outcome",
+    "clinical outcomes",
+    "surgical outcome",
+    "surgical outcomes",
+    "postoperative outcome",
+    "postoperative outcomes",
+    "perioperative outcome",
+    "perioperative outcomes",
+    "short term outcome",
+    "long term outcome",
+    "risk factor",
+    "risk factors",
+    "predictive factor",
+    "predictive factors",
+    "prognostic factor",
+    "prognostic factors",
+    "mortality",
+    "morbidity",
+    "survival",
+    "overall survival",
+    "disease free survival",
+    "recurrence free survival",
+    "length of stay",
+    "hospital stay",
+    "readmission",
+    "complication",
+    "complications",
+    "postoperative complication",
+    "postoperative complications",
+    "major complication",
+    "major complications",
+    "minor complication",
+    "minor complications",
+    "cancer",
+    "tumor",
+    "neoplasm",
+    "oncologic outcome",
+    "oncological outcome",
+    "quality of life",
+    "health related quality of life",
+}
+
+SURGERY_GENERIC_SUBSTRINGS = [
+    "outcome",
+    "outcomes",
+    "complication rate",
+    "complication rates",
+    "mortality rate",
+    "morbidity rate",
+    "risk factor",
+    "risk factors",
+    "survival rate",
+    "learning curve",
+    "clinical impact",
+    "treatment effect",
+    "treatment outcome",
+    "therapy outcome",
+    "patient reported",
+    "quality of life",
+    "cost effectiveness",
+    "meta analysis",
+    "systematic review",
+    "retrospective study",
+    "prospective study",
+    "randomized trial",
+    "cohort study",
+]
+
+SURGERY_BAD_ENDINGS = UNIVERSAL_BAD_ENDINGS | {
+    "outcome",
+    "outcomes",
+    "rate",
+    "rates",
+    "risk",
+    "risks",
+    "factor",
+    "factors",
+    "mortality",
+    "morbidity",
+    "survival",
+    "complication",
+    "complications",
+    "incidence",
+    "prevalence",
+    "diagnosis",
+    "management",
+    "treatment",
+    "therapy",
+}
+
+SURGERY_PROTECT_SUBSTRINGS = [
+    "anastomotic leakage",
+    "anastomotic leak",
+    "pancreatic fistula",
+    "postoperative pancreatic fistula",
+    "bile leak",
+    "biliary leak",
+    "surgical site infection",
+    "mesh infection",
+    "wound dehiscence",
+    "intra abdominal adhesion",
+    "peritoneal adhesion",
+    "ischemia reperfusion",
+    "postoperative ileus",
+    "drain amylase",
+    "biliary stricture",
+    "pancreaticojejunostomy",
+    "hepaticojejunostomy",
+    "low anterior resection syndrome",
+    "clavien dindo",
+    "comprehensive complication index",
+    "failure to rescue",
+    "peritoneal metastasis",
+    "liver regeneration",
+    "organ perfusion",
+    "tissue perfusion",
+    "intraoperative fluorescence",
+    "indocyanine green",
+    "microbiome",
+    "biofilm",
+    "fibrosis",
+    "anastomotic perfusion",
+    "colorectal anastomosis",
+    "pancreatic anastomosis",
+]
+
+ARXIV_GENERIC_EXACT = {
+    "machine learning",
+    "deep learning",
+    "artificial intelligence",
+    "neural network",
+    "neural networks",
+    "robotics",
+    "materials",
+    "material",
+    "dynamics",
+    "optimization",
+    "phase transition",
+    "pattern formation",
+    "complex system",
+    "complex systems",
+    "active matter",
+    "soft matter",
+    "control system",
+    "control systems",
+    "physical system",
+    "physical systems",
+    "large scale system",
+    "real world system",
+    "data driven model",
+    "learning algorithm",
+    "numerical simulation",
+    "theoretical framework",
+}
+
+ARXIV_GENERIC_SUBSTRINGS = [
+    "state of the art",
+    "machine learning model",
+    "deep learning model",
+    "neural network model",
+    "proposed framework",
+    "proposed algorithm",
+    "numerical result",
+    "simulation result",
+    "experimental result",
+    "real world",
+    "large scale",
+    "benchmark",
+]
+
+ARXIV_BAD_ENDINGS = UNIVERSAL_BAD_ENDINGS | {
+    "optimization",
+    "learning",
+    "classification",
+    "regression",
+    "prediction",
+    "estimation",
+    "detection",
+}
+
+ARXIV_PROTECT_SUBSTRINGS = [
+    "topological",
+    "nonreciprocal",
+    "self organization",
+    "self assembly",
+    "collective motion",
+    "collective dynamics",
+    "active crystal",
+    "velocity dependent alignment",
+    "jamming transition",
+    "granular jamming",
+    "percolation",
+    "reaction diffusion",
+    "turing pattern",
+    "morphological computation",
+    "reservoir computing",
+    "field mediated",
+    "remote actuation",
+    "magnetic actuation",
+    "defect tolerance",
+    "damage tolerance",
+    "graceful degradation",
+    "crack arrest",
+    "failure resilience",
+    "phase field",
+    "sharp interface",
+    "attracting manifold",
+    "rare event",
+    "precursor detection",
+    "critical transition",
+    "tipping point",
+    "adaptive sampling",
+    "closed loop discovery",
+    "boundary effect",
+    "wetting transition",
+    "contact line",
+    "capillary interaction",
+    "interfacial instability",
+    "programmable stiffness",
+    "variable stiffness",
+    "tunable compliance",
+]
+
+
+# ============================================================
+# FILTER FUNCTIONS
+# ============================================================
+
+def base_reject_reason(concept: str):
+    c = normalize_text(concept)
+    wc = word_count(c)
+
+    if not c:
+        return "empty"
+
+    if wc < MIN_WORDS:
+        return "too_few_words"
+
+    if wc > MAX_WORDS:
+        return "too_many_words"
+
+    if len(c) < 6:
+        return "too_short"
+
+    if re.fullmatch(r"[0-9\s]+", c):
+        return "numeric_only"
+
+    if exact_any(c, UNIVERSAL_GENERIC_EXACT):
+        return "universal_generic_exact"
+
+    if ends_with_any(c, UNIVERSAL_BAD_ENDINGS):
+        return "universal_bad_ending"
+
+    return ""
+
+
+def surgery_reject_reason(concept: str, occurrence=None):
+    c = normalize_text(concept)
+
+    if contains_any(c, SURGERY_PROTECT_SUBSTRINGS):
+        return ""
+
+    base = base_reject_reason(c)
+    if base:
+        return base
+
+    if exact_any(c, SURGERY_GENERIC_EXACT):
+        return "surgery_generic_exact"
+
+    if contains_any(c, SURGERY_GENERIC_SUBSTRINGS):
+        return "surgery_generic_substring"
+
+    if ends_with_any(c, SURGERY_BAD_ENDINGS):
+        return "surgery_bad_ending"
+
+    if occurrence is not None:
+        try:
+            occ = float(occ)
+            if occ >= VERY_HIGH_SURGERY_OCCURRENCE and word_count(c) <= 3:
+                return "very_high_frequency_short_surgery_term"
+        except Exception:
+            pass
+
+    broad_disease_terms = {
+        "colorectal cancer",
+        "pancreatic cancer",
+        "gastric cancer",
+        "esophageal cancer",
+        "liver cancer",
+        "rectal cancer",
+        "colon cancer",
+        "hepatocellular carcinoma",
+        "cholangiocarcinoma",
+        "pancreatic adenocarcinoma",
+    }
+
+    if c in broad_disease_terms:
+        return "broad_disease_only"
+
+    return ""
+
+
+def arxiv_reject_reason(concept: str):
+    c = normalize_text(concept)
+
+    if contains_any(c, ARXIV_PROTECT_SUBSTRINGS):
+        return ""
+
+    base = base_reject_reason(c)
+    if base:
+        return base
+
+    if exact_any(c, ARXIV_GENERIC_EXACT):
+        return "arxiv_generic_exact"
+
+    if contains_any(c, ARXIV_GENERIC_SUBSTRINGS):
+        return "arxiv_generic_substring"
+
+    if ends_with_any(c, ARXIV_BAD_ENDINGS):
+        return "arxiv_bad_ending"
+
+    return ""
+
+
+# ============================================================
+# IO HELPERS
+# ============================================================
+
+def read_csv_flexible(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"Missing file: {path}")
+
+    try:
+        df = pd.read_csv(path, dtype=str).fillna("")
+        if len(df.columns) == 1:
+            df = pd.read_csv(path, sep=";", dtype=str).fillna("")
+        return df
+    except Exception:
+        return pd.read_csv(path, sep=";", dtype=str).fillna("")
+
+
+def standardize_columns(df):
+    df = df.copy()
+    df.columns = (
+        df.columns
+        .astype(str)
+        .str.replace("\ufeff", "", regex=False)
+        .str.strip()
+        .str.lower()
+    )
+    return df
+
+
+def clean_embedding_file(embedding_df: pd.DataFrame, keep_concepts: set) -> pd.DataFrame:
+    if "concept" not in embedding_df.columns:
+        raise ValueError(f"Embedding file missing column: concept. Columns: {embedding_df.columns.tolist()}")
+
+    out = embedding_df.copy()
+    out["concept"] = out["concept"].apply(normalize_text)
+    out = out[out["concept"].isin(keep_concepts)].copy()
+    out = out.drop_duplicates(subset=["concept"])
+    return out
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+print("=" * 80)
+print("CLEAN CROSSDOMAIN VOCABULARIES")
+print("=" * 80)
+
+print("Loading surgery node summary...")
+surgery_nodes = read_csv_flexible(SURGERY_NODE_FILE)
+
+print("Loading surgery embeddings...")
+surgery_emb = read_csv_flexible(SURGERY_EMBEDDING_FILE)
+
+print("Loading arXiv node summary...")
+arxiv_nodes = read_csv_flexible(ARXIV_NODE_FILE)
+
+print("Loading arXiv embeddings...")
+arxiv_emb = read_csv_flexible(ARXIV_EMBEDDING_FILE)
+
+print("\nInput sizes:")
+print(f"Surgery nodes: {len(surgery_nodes)}")
+print(f"Surgery embeddings: {len(surgery_emb)}")
+print(f"arXiv nodes: {len(arxiv_nodes)}")
+print(f"arXiv embeddings: {len(arxiv_emb)}")
+
+
+# ============================================================
+# STANDARDIZE COLUMN NAMES
+# ============================================================
+
+surgery_nodes = standardize_columns(surgery_nodes)
+surgery_emb = standardize_columns(surgery_emb)
+arxiv_nodes = standardize_columns(arxiv_nodes)
+arxiv_emb = standardize_columns(arxiv_emb)
+
+print("\nColumn check after standardization:")
+print("surgery_nodes:", surgery_nodes.columns.tolist())
+print("surgery_emb:", surgery_emb.columns.tolist())
+print("arxiv_nodes:", arxiv_nodes.columns.tolist())
+print("arxiv_emb:", arxiv_emb.columns.tolist())
+
+for name, df_check in {
+    "surgery_nodes": surgery_nodes,
+    "surgery_emb": surgery_emb,
+    "arxiv_nodes": arxiv_nodes,
+    "arxiv_emb": arxiv_emb,
+}.items():
+    if "concept" not in df_check.columns:
+        raise ValueError(
+            f"{name} missing concept column. Columns: {df_check.columns.tolist()}"
+        )
+
+
+# ============================================================
+# CLEAN SURGERY
+# ============================================================
+
+if "concept" not in surgery_nodes.columns:
+    raise ValueError("Surgery node file missing column: concept")
+
+surgery_nodes["concept"] = surgery_nodes["concept"].apply(normalize_text)
+
+if "occurrence" in surgery_nodes.columns:
+    surgery_nodes["occurrence"] = pd.to_numeric(surgery_nodes["occurrence"], errors="coerce").fillna(0)
+else:
+    surgery_nodes["occurrence"] = 0
+
+surgery_nodes["reject_reason"] = surgery_nodes.apply(
+    lambda r: surgery_reject_reason(r["concept"], r.get("occurrence", None)),
+    axis=1
+)
+
+surgery_nodes["keep"] = surgery_nodes["reject_reason"].eq("")
+surgery_nodes["keep"] = surgery_nodes["keep"] & (surgery_nodes["occurrence"] >= MIN_SURGERY_OCCURRENCE)
+
+surgery_emb["concept"] = surgery_emb["concept"].apply(normalize_text)
+surgery_emb_concepts = set(surgery_emb["concept"].astype(str))
+
+surgery_nodes["has_embedding"] = surgery_nodes["concept"].isin(surgery_emb_concepts)
+surgery_nodes["keep"] = surgery_nodes["keep"] & surgery_nodes["has_embedding"]
+
+surgery_clean = surgery_nodes[surgery_nodes["keep"]].copy()
+surgery_removed = surgery_nodes[~surgery_nodes["keep"]].copy()
+
+surgery_keep_concepts = set(surgery_clean["concept"].astype(str))
+surgery_emb_clean = clean_embedding_file(surgery_emb, surgery_keep_concepts)
+
+
+# ============================================================
+# CLEAN ARXIV
+# ============================================================
+
+if "concept" not in arxiv_nodes.columns:
+    raise ValueError("arXiv node file missing column: concept")
+
+arxiv_nodes["concept"] = arxiv_nodes["concept"].apply(normalize_text)
+
+if "occurrence" in arxiv_nodes.columns:
+    arxiv_nodes["occurrence"] = pd.to_numeric(arxiv_nodes["occurrence"], errors="coerce").fillna(0)
+else:
+    arxiv_nodes["occurrence"] = 0
+
+arxiv_nodes["reject_reason"] = arxiv_nodes["concept"].apply(arxiv_reject_reason)
+arxiv_nodes["keep"] = arxiv_nodes["reject_reason"].eq("")
+arxiv_nodes["keep"] = arxiv_nodes["keep"] & (arxiv_nodes["occurrence"] >= MIN_ARXIV_OCCURRENCE)
+
+arxiv_emb["concept"] = arxiv_emb["concept"].apply(normalize_text)
+arxiv_emb_concepts = set(arxiv_emb["concept"].astype(str))
+
+arxiv_nodes["has_embedding"] = arxiv_nodes["concept"].isin(arxiv_emb_concepts)
+arxiv_nodes["keep"] = arxiv_nodes["keep"] & arxiv_nodes["has_embedding"]
+
+arxiv_clean = arxiv_nodes[arxiv_nodes["keep"]].copy()
+arxiv_removed = arxiv_nodes[~arxiv_nodes["keep"]].copy()
+
+arxiv_keep_concepts = set(arxiv_clean["concept"].astype(str))
+arxiv_emb_clean = clean_embedding_file(arxiv_emb, arxiv_keep_concepts)
+
+
+# ============================================================
+# SAVE
+# ============================================================
+
+surgery_clean = surgery_clean.sort_values(["occurrence", "concept"], ascending=[False, True])
+arxiv_clean = arxiv_clean.sort_values(["occurrence", "concept"], ascending=[False, True])
+
+surgery_removed = surgery_removed.sort_values(["reject_reason", "occurrence", "concept"], ascending=[True, False, True])
+arxiv_removed = arxiv_removed.sort_values(["reject_reason", "occurrence", "concept"], ascending=[True, False, True])
+
+surgery_clean.to_csv(SURGERY_CLEAN_FILE, index=False, encoding="utf-8-sig")
+arxiv_clean.to_csv(ARXIV_CLEAN_FILE, index=False, encoding="utf-8-sig")
+
+surgery_emb_clean.to_csv(SURGERY_EMBEDDING_CLEAN_FILE, index=False, encoding="utf-8-sig")
+arxiv_emb_clean.to_csv(ARXIV_EMBEDDING_CLEAN_FILE, index=False, encoding="utf-8-sig")
+
+surgery_removed.to_csv(REMOVED_SURGERY_FILE, index=False, encoding="utf-8-sig")
+arxiv_removed.to_csv(REMOVED_ARXIV_FILE, index=False, encoding="utf-8-sig")
+
+
+# ============================================================
+# SUMMARY
+# ============================================================
+
+summary_lines = []
+
+summary_lines.append("CLEAN CROSSDOMAIN VOCABULARIES SUMMARY")
+summary_lines.append("=" * 60)
+summary_lines.append("")
+summary_lines.append(f"Surgery input nodes: {len(surgery_nodes)}")
+summary_lines.append(f"Surgery kept concepts: {len(surgery_clean)}")
+summary_lines.append(f"Surgery removed concepts: {len(surgery_removed)}")
+summary_lines.append(f"Surgery clean embeddings: {len(surgery_emb_clean)}")
+summary_lines.append("")
+summary_lines.append(f"arXiv input nodes: {len(arxiv_nodes)}")
+summary_lines.append(f"arXiv kept concepts: {len(arxiv_clean)}")
+summary_lines.append(f"arXiv removed concepts: {len(arxiv_removed)}")
+summary_lines.append(f"arXiv clean embeddings: {len(arxiv_emb_clean)}")
+summary_lines.append("")
+summary_lines.append("Top surgery removed reasons:")
+summary_lines.append(str(surgery_removed["reject_reason"].value_counts().head(20)))
+summary_lines.append("")
+summary_lines.append("Top arXiv removed reasons:")
+summary_lines.append(str(arxiv_removed["reject_reason"].value_counts().head(20)))
+summary_lines.append("")
+summary_lines.append("Top kept surgery concepts:")
+if len(surgery_clean) > 0:
+    summary_lines.append(str(surgery_clean[["concept", "occurrence"]].head(30)))
+else:
+    summary_lines.append("No surgery concepts kept.")
+summary_lines.append("")
+summary_lines.append("Top kept arXiv concepts:")
+if len(arxiv_clean) > 0:
+    summary_lines.append(str(arxiv_clean[["concept", "occurrence"]].head(30)))
+else:
+    summary_lines.append("No arXiv concepts kept.")
+
+SUMMARY_FILE.write_text("\n".join(summary_lines), encoding="utf-8")
+
+print("\n" + "=" * 80)
+print("DONE")
+print("=" * 80)
+print(f"Saved: {SURGERY_CLEAN_FILE}")
+print(f"Saved: {ARXIV_CLEAN_FILE}")
+print(f"Saved: {SURGERY_EMBEDDING_CLEAN_FILE}")
+print(f"Saved: {ARXIV_EMBEDDING_CLEAN_FILE}")
+print(f"Saved: {REMOVED_SURGERY_FILE}")
+print(f"Saved: {REMOVED_ARXIV_FILE}")
+print(f"Saved: {SUMMARY_FILE}")
+
+print("\nSummary:")
+print("\n".join(summary_lines[:12]))
