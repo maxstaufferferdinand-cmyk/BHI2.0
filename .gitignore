@@ -216,3 +216,25 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# BHI2.0 large research files
+data/raw/*
+data/processed/*
+data/processed_arxiv_external/*
+data/processed_crossdomain/*
+outputs/*
+*.csv
+*.xlsx
+*.npy
+*.pkl
+*.parquet
+.env
+.env.*
+
+# Keep folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/processed_arxiv_external/.gitkeep
+!data/processed_crossdomain/.gitkeep
+!outputs/rankings/.gitkeep
+!outputs/figures/.gitkeep
+!outputs/excel_exports/.gitkeep
